@@ -24,9 +24,8 @@ app.post("/register", async (req, res) => {
     if (oldUser) {
       return res.send(409, "User already exists.");
     }
-
     let encPasswd = await bcrypt.hash(password, 10);
-    const user = User.create({
+    await User.create({
       first_name,
       last_name,
       email: email.toLowerCase(),
@@ -57,11 +56,11 @@ app.post("/login", async (req, res) => {
         { user_id: user._id, email },
         process.env.TOKEN_KEY,
         {
-          expiresIn: "2h",
+          expiresIn: "12h",
         }
       );
       //console.log(config.parsed);
-      return res.status(200).json({ token: token });
+      return res.status(200).json({ token });
     } else {
       return res.status(400).json({ error: "Invalid Credentials" });
     }
@@ -81,8 +80,6 @@ app.post("/change-password", auth, async (req, res) => {
     // Get user input
     const { password, password2 } = req.body;
     const { email } = req.user;
-    console.log("body :", req.body);
-    console.log("user :", req.user);
     // Validate user input
     if (!(password && password2)) {
       return res.status(400).send("All input requried Mismatched password");
@@ -107,28 +104,68 @@ app.post("/change-password", auth, async (req, res) => {
   }
 });
 
-// This should be the last route else any after it won't work
-app.use("*", (req, res) => {
-  res.status(404).json({
-    success: "false",
-    message: "Page not found",
-    error: {
-      statusCode: 404,
-      message: "You reached a route that is not defined on this server",
-    },
-  });
-});
-
 // Forgot password
 app.post("/forgot-password", async (req, res) => {
   const { email } = req.body;
-  await User.findOne({ email })
-    .then((user) => {
-      let reset_token = bcrypt.hash(user.first_name + user.last_name, 15);
-    })
-    .catch((err) => {
+  try {
+    const user = await User.findOne({ email });
+    if (user) {
+      let reset_token = await bcrypt.hash(user.first_name + user.last_name, 5);
+      const resetLink = `http://${process.env.APP_HOST}:${process.env.APP_PORT}/reset-password?email=${user.email}&token=${reset_token}`;
+
+      let now = Date.now();
+      //2 hours into the future
+      let future = Date.now() + 2 * 60 * 60 * 1000;
+      //update resetToken in the DB
+      await User.findOneAndUpdate(
+        { email },
+        { reset_token, reset_token_expiry: future },
+        { new: true, upsert: true }
+      );
+      //send email
+
+      //return reset link
+      return res.status(200).json({
+        resetLink,
+      });
+    } else {
       return res.status(400).send({ error: "User not found" });
+    }
+  } catch (err) {
+    return res.status(400).send({ error: "User not found" });
+  }
+});
+
+// Reset password
+app.post("/reset-password", async (req, res) => {
+  const { password, password2 } = req.body;
+  if (!(password && password2)) {
+    return res.status(400).send("All input requried Mismatched password");
+  }
+  if (password != password2) {
+    return res.status(400).send("Missmatched passwords");
+  }
+  let email = req.query.email;
+  let token = req.query.token;
+  try {
+    const user = await User.findOne({ email });
+    if (user.reset_token != token) {
+      return res.status(400).send("Reset token did not match");
+    }
+    if (Date.now() > user.reset_token_expiry) {
+      return res.status(400).send("Token has expired, pls try again.");
+    }
+    let encPasswd = await bcrypt.hash(password2, 10);
+    const filter = { email: email };
+    const update = { password: encPasswd };
+    await User.findOneAndUpdate(filter, update, {
+      new: true,
+      upsert: true,
     });
+    return res.status(201).send("password reset successfully.");
+  } catch (err) {
+    return res.status(400).send({ error: "User not found" });
+  }
 });
 
 module.exports = app;
