@@ -6,6 +6,7 @@ const jwt = require("jsonwebtoken");
 
 const User = require("./model/user");
 const auth = require("./middleware/auth").auth;
+var nodemailer = require("nodemailer");
 
 const app = express();
 
@@ -124,10 +125,34 @@ app.post("/forgot-password", async (req, res) => {
       );
       //send email
 
-      //return reset link
-      return res.status(200).json({
-        resetLink,
+      let transporter = await nodemailer.createTransport({
+        service: "Gmail",
+        auth: {
+          user: process.env.APP_EMAIL_USER,
+          pass: process.env.APP_EMAIL_PASSWD,
+        },
       });
+
+      let mailOptions = {
+        from: process.env.APP_EMAIL_USER,
+        to: "smagesh2106@gmail.com",
+        subject: "Node password reset link",
+        text: `${resetLink}`,
+      };
+
+      await transporter.sendMail(mailOptions, function (error, info) {
+        if (error) {
+          console.log(error);
+          return res.send(500, error.message);
+        } else {
+          console.log("Email sent");
+          return res.status(200).jsonp(req.body);
+        }
+      });
+      //return reset link
+      //return res.status(200).json({
+      //  resetLink,
+      //});
     } else {
       return res.status(400).send({ error: "User not found" });
     }
